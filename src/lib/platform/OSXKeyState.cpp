@@ -132,7 +132,8 @@ static const KeyEntry    s_controlKeys[] = {
     { kKeyKana, kVK_JIS_Kana },
     { kKeyMuhenkan, s_int5VK },
     { kKeyHenkan, s_int4VK },
-    { kKeyZenkaku, kVK_ANSI_Grave }
+    { kKeyZenkaku, kVK_ANSI_Grave },
+    { kKeyHangul, 54 } // 54 = kVK_RightCommand for Korean Toggle
 };
 
 
