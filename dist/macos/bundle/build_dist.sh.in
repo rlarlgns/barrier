@@ -61,6 +61,19 @@ if [ "$B_BUILDTYPE" = "Release" ]; then
     "$DEPLOYQT" Barrier.app -dmg \
     -executable="$B_BARRIERC" \
     -executable="$B_BARRIERS" || exit 1
+
+    info "Ad-hoc signing bundle with entitlements (Aggressive mode)"
+    rm -rf Barrier.app/Contents/_CodeSignature
+    find Barrier.app/Contents/Frameworks Barrier.app/Contents/PlugIns -type f | while read lib; do
+        if file "$lib" | grep -q "Mach-O"; then
+            codesign --force --sign - "$lib"
+        fi
+    done
+    codesign --force --sign - "$B_BARRIERC"
+    codesign --force --sign - "$B_BARRIERS"
+    codesign --force --sign - "Barrier.app/Contents/MacOS/barrier"
+    codesign --force --deep --sign - --entitlements @CMAKE_CURRENT_SOURCE_DIR@/Entitlements.plist Barrier.app || exit 1
+
     mv "Barrier.dmg" "Barrier-$B_VERSION.dmg" || exit 1
     success "Created Barrier-$B_VERSION.dmg"
 else
@@ -69,5 +82,18 @@ else
     "$DEPLOYQT" Barrier.app -no-strip \
     -executable="$B_BARRIERC" \
     -executable="$B_BARRIERS" || exit 1
+
+    info "Ad-hoc signing bundle with entitlements (Aggressive mode)"
+    rm -rf Barrier.app/Contents/_CodeSignature
+    find Barrier.app/Contents/Frameworks Barrier.app/Contents/PlugIns -type f | while read lib; do
+        if file "$lib" | grep -q "Mach-O"; then
+            codesign --force --sign - "$lib"
+        fi
+    done
+    codesign --force --sign - "$B_BARRIERC"
+    codesign --force --sign - "$B_BARRIERS"
+    codesign --force --sign - "Barrier.app/Contents/MacOS/barrier"
+    codesign --force --deep --sign - --entitlements @CMAKE_CURRENT_SOURCE_DIR@/Entitlements.plist Barrier.app || exit 1
+
     success "Bundle created successfully"
 fi

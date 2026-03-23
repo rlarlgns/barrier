@@ -61,7 +61,9 @@ AppConfig::AppConfig(QSettings* settings) :
     m_CryptoEnabled(false),
     m_AutoHide(false),
     m_AutoStart(false),
-    m_MinimizeToTray(false)
+    m_MinimizeToTray(false),
+    m_SerialPort(""),
+    m_SerialBaud(115200)
 {
     Q_ASSERT(m_pSettings);
 
@@ -163,6 +165,8 @@ void AppConfig::loadSettings()
     m_AutoHide = settings().value("autoHide", false).toBool();
     m_AutoStart = settings().value("autoStart", false).toBool();
     m_MinimizeToTray = settings().value("minimizeToTray", false).toBool();
+    m_SerialPort = settings().value("serialPort", "").toString();
+    m_SerialBaud = settings().value("serialBaud", 115200).toInt();
 }
 
 void AppConfig::saveSettings()
@@ -187,6 +191,8 @@ void AppConfig::saveSettings()
     settings().setValue("autoHide", m_AutoHide);
     settings().setValue("autoStart", m_AutoStart);
     settings().setValue("minimizeToTray", m_MinimizeToTray);
+    settings().setValue("serialPort", m_SerialPort);
+    settings().setValue("serialBaud", m_SerialBaud);
     settings().sync();
 }
 
@@ -243,3 +249,11 @@ bool AppConfig::getAutoStart() { return m_AutoStart; }
 void AppConfig::setMinimizeToTray(bool b) { m_MinimizeToTray = b; }
 
 bool AppConfig::getMinimizeToTray() { return m_MinimizeToTray; }
+
+const QString& AppConfig::serialPort() const { return m_SerialPort; }
+
+void AppConfig::setSerialPort(const QString& port) { m_SerialPort = port; }
+
+int AppConfig::serialBaud() const { return m_SerialBaud; }
+
+void AppConfig::setSerialBaud(int baud) { m_SerialBaud = baud; }

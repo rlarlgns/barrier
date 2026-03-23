@@ -14,7 +14,7 @@ if [ "$(uname)" = "Darwin" ]; then
     # OSX needs a lot of extra help, poor thing
     # run the osx_environment.sh script to fix paths
     . ./osx_environment.sh
-    B_CMAKE_FLAGS="-DCMAKE_OSX_SYSROOT=$(xcode-select --print-path)/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -DCMAKE_OSX_DEPLOYMENT_TARGET=10.9 $B_CMAKE_FLAGS"
+    B_CMAKE_FLAGS="-DCMAKE_OSX_SYSROOT=$(xcode-select --print-path)/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 $B_CMAKE_FLAGS"
 fi
 # allow local customizations to build environment
 [ -r ./build_env.sh ] && . ./build_env.sh
@@ -28,5 +28,12 @@ mkdir build || exit 1
 cd build || exit 1
 echo "Starting Barrier $B_BUILD_TYPE build..."
 $B_CMAKE $B_CMAKE_FLAGS .. || exit 1
-make || exit 1
+
+# Use parallel build if possible
+if [ "$(uname)" = "Darwin" ]; then
+    make -j$(sysctl -n hw.ncpu) || exit 1
+else
+    make -j$(nproc 2>/dev/null || echo 1) || exit 1
+fi
+
 echo "Build completed successfully"

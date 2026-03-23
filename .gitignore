@@ -32,3 +32,16 @@ CMakeCache.txt
 # Transient in-project-directory dependencies
 /deps/
 /out/build/x64-Debug
+
+# AppImage and Custom Build Artifacts
+AppDir/
+AppDir_x86/
+Barrier-*.AppImage
+*.AppImage
+barrier_linux_x86_64.tar.gz
+barrier_x86_64/
+build_linux/
+build_linux_x86/
+Entitlements.plist
+*.log
+

@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-cmake_minimum_required (VERSION 3.4)
+cmake_minimum_required (VERSION 3.5)
 project (barrier C CXX)
 
 option (BARRIER_BUILD_GUI "Build the GUI" ON)
@@ -325,45 +325,31 @@ elseif (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     find_program(BREW_PROGRAM "brew")
     find_program(PORT_PROGRAM "port")
 
-    if (IS_DIRECTORY /opt/procursus AND APT_PROGRAM)
-        # procursus/apt
-        set (OPENSSL_ROOT /opt/procursus)
-
-        include_directories (BEFORE SYSTEM ${OPENSSL_ROOT}/include)
-
-        set (OPENSSL_LIBS
-            ${OPENSSL_ROOT}/lib/libssl.a
-            ${OPENSSL_ROOT}/lib/libcrypto.a
-        )
-    elseif (IS_DIRECTORY /opt/local AND PORT_PROGRAM)
-        # macports
-        set (OPENSSL_ROOT /opt/local)
-
-        set (OPENSSL_LIBS
-            ${OPENSSL_ROOT}/lib/libssl.a
-            ${OPENSSL_ROOT}/lib/libcrypto.a
-            z
-        )
-    elseif (IS_DIRECTORY /usr/local/opt/openssl AND BREW_PROGRAM)
-        # brew
-        set (OPENSSL_ROOT /usr/local/opt/openssl)
-
-        include_directories (BEFORE SYSTEM ${OPENSSL_ROOT}/include)
-
-        set (OPENSSL_LIBS
-            ${OPENSSL_ROOT}/lib/libssl.a
-            ${OPENSSL_ROOT}/lib/libcrypto.a
-        )
+    # prioritize environment variable from osx_environment.sh
+    if (DEFINED ENV{OPENSSL_ROOT_DIR})
+        set (OPENSSL_ROOT $ENV{OPENSSL_ROOT_DIR})
     elseif (IS_DIRECTORY /opt/homebrew/opt/openssl AND BREW_PROGRAM)
-        # brew
         set (OPENSSL_ROOT /opt/homebrew/opt/openssl)
+    elseif (IS_DIRECTORY /usr/local/opt/openssl AND BREW_PROGRAM)
+        set (OPENSSL_ROOT /usr/local/opt/openssl)
+    elseif (IS_DIRECTORY /opt/local AND PORT_PROGRAM)
+        set (OPENSSL_ROOT /opt/local)
+    elseif (IS_DIRECTORY /opt/procursus AND APT_PROGRAM)
+        set (OPENSSL_ROOT /opt/procursus)
+    endif()
 
+    if (DEFINED OPENSSL_ROOT)
         include_directories (BEFORE SYSTEM ${OPENSSL_ROOT}/include)
-
         set (OPENSSL_LIBS
             ${OPENSSL_ROOT}/lib/libssl.a
             ${OPENSSL_ROOT}/lib/libcrypto.a
         )
+        if (IS_DIRECTORY /opt/local AND PORT_PROGRAM)
+            list (APPEND OPENSSL_LIBS z)
+        endif ()
+    else()
+        find_package (OpenSSL REQUIRED)
+        set (OPENSSL_LIBS OpenSSL::SSL OpenSSL::Crypto)
     endif()
 
 elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")

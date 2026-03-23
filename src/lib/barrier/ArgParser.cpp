@@ -295,6 +295,13 @@ ArgParser::parseGenericArgs(int argc, const char* const* argv, int& i)
     else if (isArg(i, argc, argv, NULL, "--plugin-dir", 1)) {
         argsBase().m_pluginDirectory = barrier::fs::u8path(argv[++i]);
     }
+    else if (isArg(i, argc, argv, NULL, "--serial", 1)) {
+        argsBase().m_serialPort = argv[++i];
+        argsBase().m_enableCrypto = false; // Disable crypto for serial
+    }
+    else if (isArg(i, argc, argv, NULL, "--baud", 1)) {
+        argsBase().m_serialBaud = atoi(argv[++i]);
+    }
     else {
         // option not supported here
         return false;

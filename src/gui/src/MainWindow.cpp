@@ -24,6 +24,7 @@
 #include "ServerConfigDialog.h"
 #include "SettingsDialog.h"
 #include "ZeroconfService.h"
+#include "SerialPortScanner.h"
 #include "DataDownloader.h"
 #include "CommandProcess.h"
 #include "FingerprintAcceptDialog.h"
@@ -135,6 +136,36 @@ MainWindow::MainWindow(QSettings& settings, AppConfig& appConfig) :
 
     m_pLabelScreenName->setText(getScreenName());
     m_pLabelIpAddresses->setText(getIPAddresses());
+
+    // Initialize serial widgets from config
+    QStringList availablePorts = SerialPortScanner::availablePorts();
+    m_pComboSerialPortMain->addItems(availablePorts);
+    
+    QString savedPort = appConfig.serialPort();
+    if (!savedPort.isEmpty()) {
+        if (!availablePorts.contains(savedPort)) {
+            m_pComboSerialPortMain->addItem(savedPort);
+        }
+        m_pComboSerialPortMain->setCurrentText(savedPort);
+    } else if (!availablePorts.isEmpty()) {
+        m_pComboSerialPortMain->setCurrentIndex(0);
+    }
+
+    m_pComboSerialBaudMain->setCurrentText(QString::number(appConfig.serialBaud()));
+
+    // Hide network related UI as requested
+    label_2->hide(); // IP addresses label
+    m_pLabelIpAddresses->hide();
+    m_pLabelFingerprint->hide();
+    m_pLabelLocalFingerprint->hide();
+    toolbutton_show_fingerprint->hide();
+    frame_fingerprint_details->hide();
+
+    // Hide Client network specific UI
+    m_pLabelServerName->hide();
+    m_pLineEditHostname->hide();
+    m_pCheckBoxAutoConfig->hide();
+    m_pComboServerList->hide();
 
 #if defined(Q_OS_WIN)
     // ipc must always be enabled, so that we can disable command when switching to desktop mode.
@@ -317,6 +348,10 @@ void MainWindow::saveSettings()
     settings().setValue("groupClientChecked", m_pGroupClient->isChecked());
     settings().setValue("serverHostname", m_pLineEditHostname->text());
 
+    appConfig().setSerialPort(m_pComboSerialPortMain->currentText());
+    appConfig().setSerialBaud(m_pComboSerialBaudMain->currentText().toInt());
+    appConfig().saveSettings();
+
     settings().sync();
 }
 
@@ -401,7 +436,9 @@ void MainWindow::updateFromLogLine(const QString &line)
 {
     // TODO: this code makes Andrew cry
     checkConnected(line);
+    checkDisconnected(line);
     checkFingerprint(line);
+    checkFatalError(line);
 }
 
 void MainWindow::checkConnected(const QString& line)
@@ -423,6 +460,27 @@ void MainWindow::checkConnected(const QString& line)
             appConfig().setStartedBefore(true);
             appConfig().saveSettings();
         }
+    }
+}
+
+void MainWindow::checkDisconnected(const QString& line)
+{
+    if (line.contains("disconnected from server", Qt::CaseInsensitive) ||
+        line.contains("client disconnected", Qt::CaseInsensitive) ||
+        line.contains("connection failed", Qt::CaseInsensitive) ||
+        line.contains("connection timed out", Qt::CaseInsensitive) ||
+        line.contains("dead connection", Qt::CaseInsensitive) ||
+        line.contains("failed to connect", Qt::CaseInsensitive))
+    {
+        setBarrierState(barrierDisconnected);
+    }
+}
+
+void MainWindow::checkFatalError(const QString& line)
+{
+    if (line.contains("FATAL:", Qt::CaseInsensitive)) {
+        appendLogInfo("Fatal error detected, stopping auto-restart.");
+        m_ExpectedRunningState = kStopped;
     }
 }
 
@@ -500,6 +558,15 @@ void MainWindow::proofreadInfo()
 
 void MainWindow::startBarrier()
 {
+    // Update config from main window widgets
+    appConfig().setSerialPort(m_pComboSerialPortMain->currentText());
+    appConfig().setSerialBaud(m_pComboSerialBaudMain->currentText().toInt());
+
+    // If in serial mode and hostname is empty, set a dummy one to bypass legacy checks
+    if (!appConfig().serialPort().isEmpty() && m_pLineEditHostname->text().isEmpty()) {
+        m_pLineEditHostname->setText("serial-link");
+    }
+
     bool desktopMode = appConfig().processMode() == Desktop;
     bool serviceMode = appConfig().processMode() == Service;
 
@@ -629,15 +696,12 @@ bool MainWindow::clientArgs(QStringList& args, QString& app)
         args << "--log" << appConfig().logFilenameCmd();
     }
 
-    // check auto config first, if it is disabled or no server detected,
-    // use line edit host name if it is not empty
-    if (m_pCheckBoxAutoConfig->isChecked()) {
-        if (m_pComboServerList->count() != 0) {
-            QString serverIp = m_pComboServerList->currentText();
-            args << "[" + serverIp + "]:" + QString::number(appConfig().port());
-            return true;
-        }
-    } else if (m_pLineEditHostname->text().isEmpty()) {
+    if (!appConfig().serialPort().isEmpty()) {
+        args << "--serial" << appConfig().serialPort();
+        args << "--baud" << QString::number(appConfig().serialBaud());
+    }
+
+    if (m_pLineEditHostname->text().isEmpty() && appConfig().serialPort().isEmpty()) {
         show();
         if (!m_SuppressEmptyServerWarning) {
             QMessageBox::warning(this, tr("Hostname is empty"),
@@ -646,7 +710,11 @@ bool MainWindow::clientArgs(QStringList& args, QString& app)
         return false;
     }
 
-    args << "[" + m_pLineEditHostname->text() + "]:" + QString::number(appConfig().port());
+    QString hostname = m_pLineEditHostname->text();
+    if (hostname.isEmpty()) {
+        hostname = "serial-link";
+    }
+    args << "[" + hostname + "]:" + QString::number(appConfig().port());
 
     return true;
 }
@@ -729,6 +797,11 @@ bool MainWindow::serverArgs(QStringList& args, QString& app)
 
     if (!appConfig().getRequireClientCertificate()) {
         args << "--disable-client-cert-checking";
+    }
+
+    if (!appConfig().serialPort().isEmpty()) {
+        args << "--serial" << appConfig().serialPort();
+        args << "--baud" << QString::number(appConfig().serialBaud());
     }
 
     QString configFilename = this->configFilename();
@@ -977,6 +1050,13 @@ bool MainWindow::event(QEvent* event)
 void MainWindow::updateZeroconfService()
 {
     QMutexLocker locker(&m_UpdateZeroconfMutex);
+    if (!appConfig().serialPort().isEmpty()) {
+        if (m_pZeroconfService) {
+            delete m_pZeroconfService;
+            m_pZeroconfService = NULL;
+        }
+        return;
+    }
 
     if (isBonjourRunning()) {
         if (!m_AppConfig->wizardShouldRun()) {

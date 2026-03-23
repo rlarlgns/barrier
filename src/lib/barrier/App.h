@@ -169,7 +169,9 @@ private:
     "      --enable-crypto      enable the crypto (ssl) plugin (default, deprecated).\n" \
     "      --disable-crypto     disable the crypto (ssl) plugin.\n" \
     "      --profile-dir <path> use named profile directory instead.\n" \
-    "      --drop-dir <path>    use named drop target directory instead.\n"
+    "      --drop-dir <path>    use named drop target directory instead.\n" \
+    "      --serial <port>      use serial port for communication.\n" \
+    "      --baud <baud>        use specified baud rate (default 115200).\n" \
 
 #define HELP_COMMON_INFO_2 \
     "  -h, --help               display this help and exit.\n" \
@@ -178,7 +180,9 @@ private:
 #define HELP_COMMON_ARGS \
     " [--name <screen-name>]" \
     " [--restart|--no-restart]" \
-    " [--debug <level>]"
+    " [--debug <level>]" \
+    " [--serial <port>]" \
+    " [--baud <baud>]"
 
 // system args (windows/unix)
 #if SYSAPI_UNIX

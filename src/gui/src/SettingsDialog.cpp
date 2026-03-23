@@ -22,6 +22,7 @@
 #include "QBarrierApplication.h"
 #include "QUtility.h"
 #include "AppConfig.h"
+#include "SerialPortScanner.h"
 #include "SslCertificate.h"
 #include "MainWindow.h"
 
@@ -53,6 +54,19 @@ SettingsDialog::SettingsDialog(QWidget* parent, AppConfig& config) :
     m_pCheckBoxEnableCrypto->setChecked(m_appConfig.getCryptoEnabled());
     checkbox_require_client_certificate->setChecked(m_appConfig.getRequireClientCertificate());
 
+    QStringList availablePorts = SerialPortScanner::availablePorts();
+    m_pComboSerialPort->addItems(availablePorts);
+    
+    QString savedPort = appConfig().serialPort();
+    if (!savedPort.isEmpty()) {
+        if (!availablePorts.contains(savedPort)) {
+            m_pComboSerialPort->addItem(savedPort);
+        }
+        m_pComboSerialPort->setCurrentText(savedPort);
+    }
+
+    m_pComboSerialBaud->setCurrentText(QString::number(appConfig().serialBaud()));
+
 #if defined(Q_OS_WIN)
     m_pComboElevate->setCurrentIndex(static_cast<int>(appConfig().elevateMode()));
 #else
@@ -77,6 +91,8 @@ void SettingsDialog::accept()
     m_appConfig.setAutoHide(m_pCheckBoxAutoHide->isChecked());
     m_appConfig.setAutoStart(m_pCheckBoxAutoStart->isChecked());
     m_appConfig.setMinimizeToTray(m_pCheckBoxMinimizeToTray->isChecked());
+    m_appConfig.setSerialPort(m_pComboSerialPort->currentText());
+    m_appConfig.setSerialBaud(m_pComboSerialBaud->currentText().toInt());
     m_appConfig.saveSettings();
     QDialog::accept();
 }

@@ -29,6 +29,7 @@
 #include "barrier/ServerArgs.h"
 #include "net/SocketMultiplexer.h"
 #include "net/TCPSocketFactory.h"
+#include "net/SerialSocketFactory.h"
 #include "net/XSocket.h"
 #include "arch/Arch.h"
 #include "base/EventQueue.h"
@@ -667,9 +668,17 @@ ServerApp::openClientListener(const NetworkAddress& address)
         }
     }
 
+    ISocketFactory* socketFactory = NULL;
+    if (args().m_serialPort != "") {
+        socketFactory = new SerialSocketFactory(m_events, getSocketMultiplexer(), args().m_serialPort, args().m_serialBaud);
+    }
+    else {
+        socketFactory = new TCPSocketFactory(m_events, getSocketMultiplexer());
+    }
+
     ClientListener* listen = new ClientListener(
         address,
-        new TCPSocketFactory(m_events, getSocketMultiplexer()),
+        socketFactory,
         m_events, security_level);
 
     m_events->adoptHandler(

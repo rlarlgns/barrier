@@ -51,6 +51,8 @@ public:
     bool                m_shouldExit;
     String                m_barrierAddress;
     bool                m_enableCrypto;
+    String              m_serialPort;
+    int                 m_serialBaud;
     barrier::fs::path m_profileDirectory;
     barrier::fs::path m_pluginDirectory;
 };

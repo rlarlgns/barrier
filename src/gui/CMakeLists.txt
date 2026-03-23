@@ -1,6 +1,6 @@
-cmake_minimum_required (VERSION 3.4)
+cmake_minimum_required (VERSION 3.5)
 
-find_package (Qt5 REQUIRED COMPONENTS Core Widgets Network)
+find_package (Qt5 REQUIRED COMPONENTS Core Widgets Network SerialPort)
 set (CMAKE_AUTOMOC ON)
 set (CMAKE_AUTORCC ON)
 set (CMAKE_AUTOUIC ON)
@@ -56,6 +56,7 @@ set(GUI_SOURCE_FILES
     src/ZeroconfRegister.cpp
     src/ZeroconfServer.cpp
     src/ZeroconfService.cpp
+    src/SerialPortScanner.cpp
     src/ZeroconfThread.cpp
 )
 
@@ -98,6 +99,7 @@ set(GUI_HEADER_FILES
     src/ZeroconfRegister.h
     src/ZeroconfServer.h
     src/ZeroconfService.h
+    src/SerialPortScanner.h
     src/ZeroconfThread.h
 )
 
@@ -131,7 +133,7 @@ add_executable (barrier WIN32
 
 include_directories (./src)
 
-target_link_libraries(barrier net base io Qt5::Core Qt5::Widgets Qt5::Network ${OPENSSL_LIBS})
+target_link_libraries(barrier net base io Qt5::Core Qt5::Widgets Qt5::Network Qt5::SerialPort ${OPENSSL_LIBS})
 target_compile_definitions (barrier PRIVATE -DBARRIER_VERSION_STAGE="${BARRIER_VERSION_STAGE}")
 target_compile_definitions (barrier PRIVATE -DBARRIER_REVISION="${BARRIER_REVISION}")
 

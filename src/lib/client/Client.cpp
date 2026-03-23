@@ -28,6 +28,7 @@
 #include "barrier/XBarrier.h"
 #include "barrier/StreamChunker.h"
 #include "barrier/IPlatformScreen.h"
+#include "arch/XArch.h"
 #include "mt/Thread.h"
 #include "net/TCPSocket.h"
 #include "net/IDataSocket.h"
@@ -138,7 +139,9 @@ Client::connect()
         // has changed (which can happen frequently if this is a laptop
         // being shuttled between various networks).  patch by Brent
         // Priddy.
-        m_serverAddress.resolve();
+        if (m_args.m_serialPort == "") {
+            m_serverAddress.resolve();
+        }
 
         // m_serverAddress will be null if the hostname address is not reolved
         if (m_serverAddress.getAddress() != NULL) {
@@ -149,9 +152,13 @@ Client::connect()
           m_serverAddress.getPort()));
         }
 
+        IArchNetwork::EAddressFamily family = IArchNetwork::kINET;
+        if (m_serverAddress.getAddress() != NULL) {
+            family = ARCH->getAddrFamily(m_serverAddress.getAddress());
+        }
+
         // create the socket
-        IDataSocket* socket = m_socketFactory->create(ARCH->getAddrFamily(m_serverAddress.getAddress()),
-                                                      security_level);
+        IDataSocket* socket = m_socketFactory->create(family, security_level);
         m_socket = dynamic_cast<TCPSocket*>(socket);
 
         // filter socket messages, including a packetizing filter
