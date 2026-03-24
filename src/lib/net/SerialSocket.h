@@ -80,5 +80,6 @@ private:
     bool                m_synced;
     bool                m_skippingWakeup;
     EventQueueTimer*    m_wakeupTimer;
+    size_t              m_resetMatchIdx;
     std::shared_ptr<bool> m_activeConnection;
 };

@@ -36,6 +36,7 @@ SerialSocket::SerialSocket(IEventQueue* events, SocketMultiplexer* socketMultipl
     m_synced(false),
     m_skippingWakeup(isServer),
     m_wakeupTimer(NULL),
+    m_resetMatchIdx(0),
     m_activeConnection(activeConnection)
 {
 }
@@ -164,6 +165,10 @@ SerialSocket::connect(const NetworkAddress&)
         onConnected();
         
         if (!m_isServer) {
+            // Client: write a 16-byte In-Band Reset sequence to kill any hanging Server connection
+            const UInt8 resetSeq[] = "BARRIER_RESET_RX";
+            ARCH->writeSerial(m_serialPort, resetSeq, 16);
+            
             // Client: write a dummy "wake up" burst of bytes. 
             // The server will discard these before processing real Barrier greetings.
             UInt8 wakeup[1] = {0xAA};
@@ -233,20 +238,57 @@ SerialSocket::doRead()
             m_synced = true;
         }
 
+        // --- IN-BAND RESET SEQUENCE SCANNER ---
+        const UInt8 resetSeq[] = "BARRIER_RESET_RX";
+        const size_t resetSeqLen = 16;
+        bool disconnected = false;
+        size_t validDataLen = 0;
+        
+        for (size_t i = 0; i < n; ++i) {
+            if (buffer[i] == resetSeq[m_resetMatchIdx]) {
+                m_resetMatchIdx++;
+                if (m_resetMatchIdx == resetSeqLen) {
+                    m_resetMatchIdx = 0;
+                    if (m_isServer && m_synced) {
+                        LOG((CLOG_NOTE "Serial In-Band Reset detected! Killing stuck old connection."));
+                        disconnected = true;
+                        break;
+                    }
+                }
+            } else {
+                if (m_resetMatchIdx > 0) {
+                    m_inputBuffer.write(resetSeq, m_resetMatchIdx);
+                    m_resetMatchIdx = 0;
+                    // Recheck the mismatched byte to see if it starts a new sequence
+                    if (buffer[i] == resetSeq[0]) {
+                        m_resetMatchIdx = 1;
+                        continue;
+                    }
+                }
+                buffer[validDataLen++] = buffer[i];
+            }
+        }
+
+        if (disconnected) {
+            m_events->addEvent(Event(m_events->forISocket().disconnected(), getEventTarget()));
+            onDisconnected();
+            return kBreak;
+        }
+
         size_t offset = 0;
         if (m_isServer && m_skippingWakeup) {
-            while (offset < n && buffer[offset] == 0xAA) {
+            while (offset < validDataLen && buffer[offset] == 0xAA) {
                 offset++;
             }
-            if (offset < n) {
+            if (offset < validDataLen) {
                 // We found a non-0xAA byte!
                 m_skippingWakeup = false;
             }
         }
 
         bool wasEmpty = (m_inputBuffer.getSize() == 0);
-        if (offset < n) {
-            m_inputBuffer.write(buffer + offset, (UInt32)(n - offset));
+        if (offset < validDataLen) {
+            m_inputBuffer.write(buffer + offset, (UInt32)(validDataLen - offset));
         }
 
         if (wasEmpty && m_inputBuffer.getSize() > 0) {
