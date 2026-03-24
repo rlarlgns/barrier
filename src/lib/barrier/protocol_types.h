@@ -47,7 +47,7 @@ static const UInt32        kMaxHelloLength = 1024;
 static const double        kKeepAliveRate = 3.0;
 
 // number of skipped kMsgCKeepAlive messages that indicates a problem
-static const double        kKeepAlivesUntilDeath = 3.0;
+static const double        kKeepAlivesUntilDeath = 20.0;
 
 // obsolete heartbeat stuff
 static const double        kHeartRate = -1.0;
