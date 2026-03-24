@@ -29,17 +29,17 @@ public:
     // ISocket overrides
     virtual void        bind(const NetworkAddress&);
     virtual void        close();
-    virtual void*        getEventTarget() const;
+    virtual void*       getEventTarget() const;
 
     // IStream overrides
-    virtual UInt32        read(void* buffer, UInt32 n);
+    virtual UInt32      read(void* buffer, UInt32 n);
     virtual void        write(const void* buffer, UInt32 n);
     virtual void        flush();
     virtual void        shutdownInput();
     virtual void        shutdownOutput();
     virtual bool        isReady() const;
     virtual bool        isFatal() const;
-    virtual UInt32        getSize() const;
+    virtual UInt32      getSize() const;
 
     // IDataSocket overrides
     virtual void        connect(const NetworkAddress&);
@@ -53,8 +53,8 @@ protected:
         kNew
     };
 
-    virtual EJobResult    doRead();
-    virtual EJobResult    doWrite();
+    virtual EJobResult  doRead();
+    virtual EJobResult  doWrite();
 
     void setJob(std::unique_ptr<ISocketMultiplexerJob>&& job);
 
@@ -63,11 +63,10 @@ private:
     void                onDisconnected();
     MultiplexerJobStatus serviceConnected(ISocketMultiplexerJob*, bool, bool, bool);
     void                handleWakeupTimer(const Event&, void*);
-    void                handleImmunityTimer(const Event&, void*);
 
 private:
     IEventQueue*        m_events;
-    SocketMultiplexer*    m_socketMultiplexer;
+    SocketMultiplexer*  m_socketMultiplexer;
     std::string         m_portName;
     int                 m_baudRate;
     ArchSerialPort      m_serialPort;
@@ -81,8 +80,5 @@ private:
     bool                m_synced;
     bool                m_skippingWakeup;
     EventQueueTimer*    m_wakeupTimer;
-    size_t              m_resetMatchIdx;
-    bool                m_ignoreResets;
-    EventQueueTimer*    m_immunityTimer;
     std::shared_ptr<bool> m_activeConnection;
 };

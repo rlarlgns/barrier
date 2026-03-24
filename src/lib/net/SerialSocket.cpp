@@ -8,21 +8,25 @@
  */
 
 #include "net/SerialSocket.h"
+#include "net/NetworkAddress.h"
 #include "net/SocketMultiplexer.h"
 #include "net/TSocketMultiplexerMethodJob.h"
-#include "mt/Lock.h"
-#include "arch/Arch.h"
 #include "base/Log.h"
 #include "base/IEventQueue.h"
-#include "base/XBase.h"
 #include "base/TMethodEventJob.h"
-#include "base/Event.h"
-#include "arch/XArch.h"
+#include "base/XBase.h"
+#include "arch/Arch.h"
+#include "mt/Lock.h"
+
 #include <cstring>
 
-static const std::size_t MAX_INPUT_BUFFER_SIZE = 1024 * 1024;
+//
+// SerialSocket
+//
 
-SerialSocket::SerialSocket(IEventQueue* events, SocketMultiplexer* socketMultiplexer, const std::string& port, int baudRate, bool isServer, std::shared_ptr<bool> activeConnection) :
+SerialSocket::SerialSocket(IEventQueue* events, SocketMultiplexer* socketMultiplexer,
+                           const std::string& port, int baudRate, bool isServer,
+                           std::shared_ptr<bool> activeConnection) :
     IDataSocket(events),
     m_events(events),
     m_socketMultiplexer(socketMultiplexer),
@@ -36,9 +40,6 @@ SerialSocket::SerialSocket(IEventQueue* events, SocketMultiplexer* socketMultipl
     m_synced(false),
     m_skippingWakeup(isServer),
     m_wakeupTimer(NULL),
-    m_resetMatchIdx(0),
-    m_ignoreResets(true),
-    m_immunityTimer(NULL),
     m_activeConnection(activeConnection)
 {
 }
@@ -51,13 +52,13 @@ SerialSocket::~SerialSocket()
 void
 SerialSocket::bind(const NetworkAddress&)
 {
-    // Serial ports don't really bind in the network sense
+    // Serial ports don't bind in the network sense
 }
 
 void
 SerialSocket::close()
 {
-    setJob(NULL);
+    setJob(nullptr);
 
     Lock lock(&m_mutex);
     if (m_connected) {
@@ -69,17 +70,11 @@ SerialSocket::close()
         ARCH->closeSerial(m_serialPort);
         m_serialPort = NULL;
     }
-    
+
     if (m_wakeupTimer != NULL) {
         m_events->removeHandler(Event::kTimer, m_wakeupTimer);
         m_events->deleteTimer(m_wakeupTimer);
         m_wakeupTimer = NULL;
-    }
-
-    if (m_immunityTimer != NULL) {
-        m_events->removeHandler(Event::kTimer, m_immunityTimer);
-        m_events->deleteTimer(m_immunityTimer);
-        m_immunityTimer = NULL;
     }
 }
 
@@ -94,9 +89,7 @@ SerialSocket::read(void* buffer, UInt32 n)
 {
     Lock lock(&m_mutex);
     UInt32 size = m_inputBuffer.getSize();
-    if (n > size) {
-        n = size;
-    }
+    if (n > size) n = size;
     if (buffer != NULL && n != 0) {
         memcpy(buffer, m_inputBuffer.peek(n), n);
     }
@@ -125,7 +118,7 @@ SerialSocket::write(const void* buffer, UInt32 n)
 void
 SerialSocket::flush()
 {
-    // For serial, we'll just assume it flushes quickly or we don't block
+    // For serial, we'll just assume it flushes quickly
 }
 
 void
@@ -171,32 +164,31 @@ SerialSocket::connect(const NetworkAddress&)
     try {
         m_serialPort = ARCH->openSerial(m_portName, m_baudRate);
         onConnected();
-        
+
         if (!m_isServer) {
-            // Client: write a dummy "wake up" burst of bytes BEFORE the reset sequence.
-            // The server will discard these before processing real Barrier greetings.
-            UInt8 wakeup[1] = {0xAA};
-            ARCH->writeSerial(m_serialPort, wakeup, 1);
-            
-            // start periodic ping
+            // Client: flood 256 bytes of 0xAA before any real Barrier data.
+            //
+            // Purpose: if the server still holds a zombie connection from our
+            //   previous session, the 256-byte blob arrives as an absurdly large
+            //   packet-length prefix (0xAAAAAAAA ≈ 2.8 GB).  Barrier's own
+            //   PacketStreamFilter checks every incoming length against
+            //   PROTOCOL_MAX_MESSAGE_LENGTH (4 MB) and fires inputFormatError,
+            //   which closes the zombie socket immediately.
+            //   A fresh server ignores these bytes via m_skippingWakeup.
+            //
+            // 256 bytes guarantees the length prefix (first 4 bytes) is all 0xAA
+            // regardless of UART FIFO timing — the server always reads at least 4.
+            UInt8 wakeup[256];
+            memset(wakeup, 0xAA, sizeof(wakeup));
+            ARCH->writeSerial(m_serialPort, wakeup, sizeof(wakeup));
+
+            // start periodic ping (keeps the server's wakeup logic alive)
             m_wakeupTimer = m_events->newOneShotTimer(0.2, NULL);
-            m_events->adoptHandler(Event::kTimer, m_wakeupTimer, new TMethodEventJob<SerialSocket>(this, &SerialSocket::handleWakeupTimer));
+            m_events->adoptHandler(Event::kTimer, m_wakeupTimer,
+                new TMethodEventJob<SerialSocket>(this, &SerialSocket::handleWakeupTimer));
         }
 
-        // BOTH Client and Server: write a 16-byte In-Band Reset sequence to kill any hanging connections on the other side
-        const UInt8 resetSeq[] = "BARRIER_RESET_RX";
-        ARCH->writeSerial(m_serialPort, resetSeq, 16);
-        
-        // Start a 5.0s immunity window so we don't kill ourselves with the other side's reset burst
-        m_ignoreResets = true;
-        m_immunityTimer = m_events->newOneShotTimer(5.0, NULL);
-        m_events->adoptHandler(Event::kTimer, m_immunityTimer, new TMethodEventJob<SerialSocket>(this, &SerialSocket::handleImmunityTimer));
-
         m_events->addEvent(Event(m_events->forIDataSocket().connected(), getEventTarget()));
-        
-        // Use a small trick: since SerialPort is not an ArchSocket, 
-        // and SocketMultiplexer expects ArchSocket, we might need a workaround.
-        // For now, let's hope we can cast the fd to ArchSocket on Unix.
         setJob(newJob());
     }
     catch (std::exception& e) {
@@ -212,8 +204,6 @@ SerialSocket::newJob()
         return {};
     }
 
-    // This is the risky part: casting ArchSerialPort to ArchSocket.
-    // On Unix, both are based on file descriptors.
     ArchSocket pseudoSocket = reinterpret_cast<ArchSocket>(m_serialPort);
 
     auto writable = m_writable && (m_outputBuffer.getSize() > 0);
@@ -232,71 +222,42 @@ SerialSocket::doRead()
     UInt8 buffer[1024];
     size_t n = ARCH->readSerial(m_serialPort, buffer, sizeof(buffer));
     if (n > 0) {
-        bool wasEmpty = (m_inputBuffer.getSize() == 0); // Capture empty state BEFORE any writes
-
-        // [DEBUG LOGGING] Dump incoming exact hex bytes to the user interface
-        std::string hexStr = "";
+        // Debug hex dump
+        std::string hexStr;
         char hex[8];
         for (size_t i = 0; i < n; ++i) {
             snprintf(hex, sizeof(hex), "%02X ", buffer[i]);
             hexStr += hex;
         }
         LOG((CLOG_PRINT "Serial incoming %d bytes: %s", (int)n, hexStr.c_str()));
-        // If client, any received data means the server is awake and talking.
+
+        // Client: first data received confirms server is alive → cancel wakeup timer
         if (!m_isServer && m_wakeupTimer != NULL) {
             m_events->removeHandler(Event::kTimer, m_wakeupTimer);
             m_events->deleteTimer(m_wakeupTimer);
             m_wakeupTimer = NULL;
         }
 
+        // Server: first data received → allow doWrite() to proceed
         if (m_isServer && !m_synced) {
             m_synced = true;
         }
 
-        // --- IN-BAND RESET SEQUENCE SCANNER ---
-        const UInt8 resetSeq[] = "BARRIER_RESET_RX";
-        const size_t resetSeqLen = 16;
-        bool disconnected = false;
-        
-        for (size_t i = 0; i < n; ++i) {
-            UInt8 b = buffer[i];
-
-            if (m_isServer && m_skippingWakeup) {
-                if (b == 0xAA) {
-                    continue;
-                }
-                m_skippingWakeup = false;
+        // Server: skip all leading 0xAA wakeup bytes (from the 256-byte flood)
+        size_t offset = 0;
+        if (m_isServer && m_skippingWakeup) {
+            while (offset < n && buffer[offset] == 0xAA) {
+                offset++;
             }
-
-            if (b == resetSeq[m_resetMatchIdx]) {
-                m_resetMatchIdx++;
-                if (m_resetMatchIdx == resetSeqLen) {
-                    m_resetMatchIdx = 0;
-                    if (!m_ignoreResets) {
-                        LOG((CLOG_NOTE "Serial In-Band Reset detected! Killing stuck old connection."));
-                        disconnected = true;
-                        break;
-                    } else {
-                        LOG((CLOG_DEBUG1 "Serial In-Band Reset strictly ignored due to immunity window."));
-                    }
-                }
-            } else {
-                if (m_resetMatchIdx > 0) {
-                    m_inputBuffer.write(resetSeq, (UInt32)m_resetMatchIdx);
-                    m_resetMatchIdx = 0;
-                    if (b == resetSeq[0]) {
-                        m_resetMatchIdx = 1;
-                        continue;
-                    }
-                }
-                m_inputBuffer.write(&b, 1);
+            if (offset < n) {
+                // First non-0xAA byte found – stop skipping
+                m_skippingWakeup = false;
             }
         }
 
-        if (disconnected) {
-            m_events->addEvent(Event(m_events->forISocket().disconnected(), getEventTarget()));
-            onDisconnected();
-            return kBreak;
+        bool wasEmpty = (m_inputBuffer.getSize() == 0);
+        if (offset < n) {
+            m_inputBuffer.write(buffer + offset, (UInt32)(n - offset));
         }
 
         if (wasEmpty && m_inputBuffer.getSize() > 0) {
@@ -310,8 +271,10 @@ SerialSocket::doRead()
 SerialSocket::EJobResult
 SerialSocket::doWrite()
 {
+    // Block server tx until we have received the client's wakeup flood.
+    // This prevents the Barrier Hello from being lost before the client
+    // is ready to read.
     if (m_isServer && !m_synced) {
-        // Block writing until we receive the wakeup trigger from the client.
         return kRetry;
     }
 
@@ -367,7 +330,7 @@ SerialSocket::serviceConnected(ISocketMultiplexerJob* job, bool read, bool write
         return {false, {}};
     }
 
-    if (read) doRead();
+    if (read)  doRead();
     if (write) doWrite();
 
     auto new_job = newJob();
@@ -378,25 +341,16 @@ SerialSocket::serviceConnected(ISocketMultiplexerJob* job, bool read, bool write
 void
 SerialSocket::handleWakeupTimer(const Event&, void*)
 {
-    // Prevent zombie timers from queued events that ran after timer cancellation
+    // Prevent zombie timers
     if (!m_connected || m_isServer || m_wakeupTimer == NULL) return;
-    
-    // Resend a single 0xAA byte to ensure the server wakes up
+
+    // Re-send a single 0xAA to continuously wake up the server's serial FIFO
     UInt8 wakeup[1] = {0xAA};
     ARCH->writeSerial(m_serialPort, wakeup, 1);
-    
-    // Reschedule the timer
+
+    // Reschedule
     m_events->deleteTimer(m_wakeupTimer);
     m_wakeupTimer = m_events->newOneShotTimer(0.2, NULL);
-    m_events->adoptHandler(Event::kTimer, m_wakeupTimer, new TMethodEventJob<SerialSocket>(this, &SerialSocket::handleWakeupTimer));
-}
-
-void
-SerialSocket::handleImmunityTimer(const Event&, void*)
-{
-    m_ignoreResets = false;
-    if (m_immunityTimer != NULL) {
-        m_events->deleteTimer(m_immunityTimer);
-        m_immunityTimer = NULL;
-    }
+    m_events->adoptHandler(Event::kTimer, m_wakeupTimer,
+        new TMethodEventJob<SerialSocket>(this, &SerialSocket::handleWakeupTimer));
 }
