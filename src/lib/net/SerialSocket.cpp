@@ -257,10 +257,18 @@ SerialSocket::doRead()
         const UInt8 resetSeq[] = "BARRIER_RESET_RX";
         const size_t resetSeqLen = 16;
         bool disconnected = false;
-        size_t validDataLen = 0;
         
         for (size_t i = 0; i < n; ++i) {
-            if (buffer[i] == resetSeq[m_resetMatchIdx]) {
+            UInt8 b = buffer[i];
+
+            if (m_isServer && m_skippingWakeup) {
+                if (b == 0xAA) {
+                    continue;
+                }
+                m_skippingWakeup = false;
+            }
+
+            if (b == resetSeq[m_resetMatchIdx]) {
                 m_resetMatchIdx++;
                 if (m_resetMatchIdx == resetSeqLen) {
                     m_resetMatchIdx = 0;
@@ -274,15 +282,14 @@ SerialSocket::doRead()
                 }
             } else {
                 if (m_resetMatchIdx > 0) {
-                    m_inputBuffer.write(resetSeq, m_resetMatchIdx);
+                    m_inputBuffer.write(resetSeq, (UInt32)m_resetMatchIdx);
                     m_resetMatchIdx = 0;
-                    // Recheck the mismatched byte to see if it starts a new sequence
-                    if (buffer[i] == resetSeq[0]) {
+                    if (b == resetSeq[0]) {
                         m_resetMatchIdx = 1;
                         continue;
                     }
                 }
-                buffer[validDataLen++] = buffer[i];
+                m_inputBuffer.write(&b, 1);
             }
         }
 
@@ -290,21 +297,6 @@ SerialSocket::doRead()
             m_events->addEvent(Event(m_events->forISocket().disconnected(), getEventTarget()));
             onDisconnected();
             return kBreak;
-        }
-
-        size_t offset = 0;
-        if (m_isServer && m_skippingWakeup) {
-            while (offset < validDataLen && buffer[offset] == 0xAA) {
-                offset++;
-            }
-            if (offset < validDataLen) {
-                // We found a non-0xAA byte!
-                m_skippingWakeup = false;
-            }
-        }
-
-        if (offset < validDataLen) {
-            m_inputBuffer.write(buffer + offset, (UInt32)(validDataLen - offset));
         }
 
         if (wasEmpty && m_inputBuffer.getSize() > 0) {
