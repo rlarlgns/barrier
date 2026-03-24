@@ -172,17 +172,8 @@ SerialSocket::connect(const NetworkAddress&)
         m_serialPort = ARCH->openSerial(m_portName, m_baudRate);
         onConnected();
         
-        // BOTH Client and Server: write a 16-byte In-Band Reset sequence to kill any hanging connections on the other side
-        const UInt8 resetSeq[] = "BARRIER_RESET_RX";
-        ARCH->writeSerial(m_serialPort, resetSeq, 16);
-        
-        // Start a 5.0s immunity window so we don't kill ourselves with the other side's reset burst
-        m_ignoreResets = true;
-        m_immunityTimer = m_events->newOneShotTimer(5.0, NULL);
-        m_events->adoptHandler(Event::kTimer, m_immunityTimer, new TMethodEventJob<SerialSocket>(this, &SerialSocket::handleImmunityTimer));
-
         if (!m_isServer) {
-            // Client: write a dummy "wake up" burst of bytes. 
+            // Client: write a dummy "wake up" burst of bytes BEFORE the reset sequence.
             // The server will discard these before processing real Barrier greetings.
             UInt8 wakeup[1] = {0xAA};
             ARCH->writeSerial(m_serialPort, wakeup, 1);
@@ -191,6 +182,15 @@ SerialSocket::connect(const NetworkAddress&)
             m_wakeupTimer = m_events->newOneShotTimer(0.2, NULL);
             m_events->adoptHandler(Event::kTimer, m_wakeupTimer, new TMethodEventJob<SerialSocket>(this, &SerialSocket::handleWakeupTimer));
         }
+
+        // BOTH Client and Server: write a 16-byte In-Band Reset sequence to kill any hanging connections on the other side
+        const UInt8 resetSeq[] = "BARRIER_RESET_RX";
+        ARCH->writeSerial(m_serialPort, resetSeq, 16);
+        
+        // Start a 5.0s immunity window so we don't kill ourselves with the other side's reset burst
+        m_ignoreResets = true;
+        m_immunityTimer = m_events->newOneShotTimer(5.0, NULL);
+        m_events->adoptHandler(Event::kTimer, m_immunityTimer, new TMethodEventJob<SerialSocket>(this, &SerialSocket::handleImmunityTimer));
 
         m_events->addEvent(Event(m_events->forIDataSocket().connected(), getEventTarget()));
         
