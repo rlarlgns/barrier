@@ -63,6 +63,7 @@ private:
     void                onDisconnected();
     MultiplexerJobStatus serviceConnected(ISocketMultiplexerJob*, bool, bool, bool);
     void                handleWakeupTimer(const Event&, void*);
+    void                handleImmunityTimer(const Event&, void*);
 
 private:
     IEventQueue*        m_events;
@@ -81,5 +82,7 @@ private:
     bool                m_skippingWakeup;
     EventQueueTimer*    m_wakeupTimer;
     size_t              m_resetMatchIdx;
+    bool                m_ignoreResets;
+    EventQueueTimer*    m_immunityTimer;
     std::shared_ptr<bool> m_activeConnection;
 };

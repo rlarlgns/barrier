@@ -37,6 +37,8 @@ SerialSocket::SerialSocket(IEventQueue* events, SocketMultiplexer* socketMultipl
     m_skippingWakeup(isServer),
     m_wakeupTimer(NULL),
     m_resetMatchIdx(0),
+    m_ignoreResets(true),
+    m_immunityTimer(NULL),
     m_activeConnection(activeConnection)
 {
 }
@@ -72,6 +74,12 @@ SerialSocket::close()
         m_events->removeHandler(Event::kTimer, m_wakeupTimer);
         m_events->deleteTimer(m_wakeupTimer);
         m_wakeupTimer = NULL;
+    }
+
+    if (m_immunityTimer != NULL) {
+        m_events->removeHandler(Event::kTimer, m_immunityTimer);
+        m_events->deleteTimer(m_immunityTimer);
+        m_immunityTimer = NULL;
     }
 }
 
@@ -164,11 +172,16 @@ SerialSocket::connect(const NetworkAddress&)
         m_serialPort = ARCH->openSerial(m_portName, m_baudRate);
         onConnected();
         
+        // BOTH Client and Server: write a 16-byte In-Band Reset sequence to kill any hanging connections on the other side
+        const UInt8 resetSeq[] = "BARRIER_RESET_RX";
+        ARCH->writeSerial(m_serialPort, resetSeq, 16);
+        
+        // Start a 1.5s immunity window so we don't kill ourselves with the other side's reset burst
+        m_ignoreResets = true;
+        m_immunityTimer = m_events->newOneShotTimer(1.5, NULL);
+        m_events->adoptHandler(Event::kTimer, m_immunityTimer, new TMethodEventJob<SerialSocket>(this, &SerialSocket::handleImmunityTimer));
+
         if (!m_isServer) {
-            // Client: write a 16-byte In-Band Reset sequence to kill any hanging Server connection
-            const UInt8 resetSeq[] = "BARRIER_RESET_RX";
-            ARCH->writeSerial(m_serialPort, resetSeq, 16);
-            
             // Client: write a dummy "wake up" burst of bytes. 
             // The server will discard these before processing real Barrier greetings.
             UInt8 wakeup[1] = {0xAA};
@@ -249,7 +262,7 @@ SerialSocket::doRead()
                 m_resetMatchIdx++;
                 if (m_resetMatchIdx == resetSeqLen) {
                     m_resetMatchIdx = 0;
-                    if (m_isServer && m_synced) {
+                    if (!m_ignoreResets) {
                         LOG((CLOG_NOTE "Serial In-Band Reset detected! Killing stuck old connection."));
                         disconnected = true;
                         break;
@@ -381,4 +394,14 @@ SerialSocket::handleWakeupTimer(const Event&, void*)
     m_events->deleteTimer(m_wakeupTimer);
     m_wakeupTimer = m_events->newOneShotTimer(0.2, NULL);
     m_events->adoptHandler(Event::kTimer, m_wakeupTimer, new TMethodEventJob<SerialSocket>(this, &SerialSocket::handleWakeupTimer));
+}
+
+void
+SerialSocket::handleImmunityTimer(const Event&, void*)
+{
+    m_ignoreResets = false;
+    if (m_immunityTimer != NULL) {
+        m_events->deleteTimer(m_immunityTimer);
+        m_immunityTimer = NULL;
+    }
 }
