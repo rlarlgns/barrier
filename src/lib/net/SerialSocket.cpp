@@ -176,9 +176,9 @@ SerialSocket::connect(const NetworkAddress&)
         const UInt8 resetSeq[] = "BARRIER_RESET_RX";
         ARCH->writeSerial(m_serialPort, resetSeq, 16);
         
-        // Start a 1.5s immunity window so we don't kill ourselves with the other side's reset burst
+        // Start a 5.0s immunity window so we don't kill ourselves with the other side's reset burst
         m_ignoreResets = true;
-        m_immunityTimer = m_events->newOneShotTimer(1.5, NULL);
+        m_immunityTimer = m_events->newOneShotTimer(5.0, NULL);
         m_events->adoptHandler(Event::kTimer, m_immunityTimer, new TMethodEventJob<SerialSocket>(this, &SerialSocket::handleImmunityTimer));
 
         if (!m_isServer) {
@@ -232,6 +232,8 @@ SerialSocket::doRead()
     UInt8 buffer[1024];
     size_t n = ARCH->readSerial(m_serialPort, buffer, sizeof(buffer));
     if (n > 0) {
+        bool wasEmpty = (m_inputBuffer.getSize() == 0); // Capture empty state BEFORE any writes
+
         // [DEBUG LOGGING] Dump incoming exact hex bytes to the user interface
         std::string hexStr = "";
         char hex[8];
@@ -266,6 +268,8 @@ SerialSocket::doRead()
                         LOG((CLOG_NOTE "Serial In-Band Reset detected! Killing stuck old connection."));
                         disconnected = true;
                         break;
+                    } else {
+                        LOG((CLOG_DEBUG1 "Serial In-Band Reset strictly ignored due to immunity window."));
                     }
                 }
             } else {
@@ -299,7 +303,6 @@ SerialSocket::doRead()
             }
         }
 
-        bool wasEmpty = (m_inputBuffer.getSize() == 0);
         if (offset < validDataLen) {
             m_inputBuffer.write(buffer + offset, (UInt32)(validDataLen - offset));
         }
